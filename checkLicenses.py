@@ -86,7 +86,7 @@ def printFeature(feat):
                 currHour = time.localtime(time.time()).tm_hour
                 currMin = time.localtime(time.time()).tm_min
                 elapsedDay = (currYearDay - startYearDay) if (currYearDay>=startYearDay) else (currYearDay - startYearDay +365)
-                elapsedHrs = (currHour - startHour) if (currHour>=startHour) else (currHour - startHour +60)
+                elapsedHrs = (currHour - startHour) if (currHour>=startHour) else (currHour - startHour +24)
                 elapsedMin = (currMin - startMin) if (currMin>=startMin) else (currMin - startMin +60)
                 elapsedTime = ""
                 if elapsedDay:
