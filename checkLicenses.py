@@ -47,11 +47,12 @@ def printHelp():
             checkLicenses ICC
     """
 
-licFile = ".lic"
+licFile = os.path.expanduser("~/.lic")
 
 reFeatureOk = re.compile(r"Users of ([-\w\d]+):\s+\(Total of (\d+) licenses? issued;\s+Total of (\d+) licenses? in use\)")
 reFeatureNok = re.compile(r"Users of ([-\w\d]+):\s+\(Error: (\d+) licenses?,\s+unsupported by licensed server\)")
 reUser = re.compile(r"(.*),\s+start\s+\w+\s+(\d+\/\d+)\s+(\d+:\d+)")
+reUserQueued = re.compile(r"(.*)\squeued for (\d+) licenses?")
 
 lics = dict()
 
@@ -78,23 +79,32 @@ def printFeature(feat):
             for user in users :
                 #Use the regex to retrieve relevant informations
                 m = reUser.match(user)
-                startDate = m.group(2)
-                startYearDay = time.strptime(startDate,"%m/%d").tm_yday
-                startHour = int(m.group(3).split(":")[0])
-                startMin = int(m.group(3).split(":")[1])
-                currYearDay = time.localtime(time.time()).tm_yday
-                currHour = time.localtime(time.time()).tm_hour
-                currMin = time.localtime(time.time()).tm_min
-                elapsedDay = (currYearDay - startYearDay) if (currYearDay>=startYearDay) else (currYearDay - startYearDay +365)
-                elapsedHrs = (currHour - startHour) if (currHour>=startHour) else (currHour - startHour +24)
-                elapsedMin = (currMin - startMin) if (currMin>=startMin) else (currMin - startMin +60)
-                elapsedTime = ""
-                if elapsedDay:
-                    elapsedTime+=str(elapsedDay)+"D "
-                if elapsedHrs:
-                    elapsedTime+=str(elapsedHrs)+"h "
-                elapsedTime+=str(elapsedMin)+"m"
-                print("  Since "+((startDate + " ") if elapsedDay else "") + m.group(3) + " ("+elapsedTime+"): " + m.group(1))
+                if m :
+                    startDate = m.group(2)
+                    startYearDay = time.strptime(startDate,"%m/%d").tm_yday
+                    startHour = int(m.group(3).split(":")[0])
+                    startMin = int(m.group(3).split(":")[1])
+                    currYearDay = time.localtime(time.time()).tm_yday
+                    currHour = time.localtime(time.time()).tm_hour
+                    currMin = time.localtime(time.time()).tm_min
+                    elapsedMin = (currMin - startMin) if (currMin>=startMin) else (currMin - startMin +60)
+                    elapsedHrs = (currHour - startHour) if (currHour>=startHour) else (currHour - startHour +24)
+                    elapsedHrs = (elapsedHrs) if (currMin>=startMin) else (elapsedHrs -1)
+                    elapsedDay = (currYearDay - startYearDay) if (currYearDay>=startYearDay) else (currYearDay - startYearDay +365)
+                    elapsedDay = (elapsedDay) if (currHour>=startHour) else (elapsedDay -1)
+                    elapsedTime = ""
+                    if elapsedDay:
+                        elapsedTime+=str(elapsedDay)+"D "
+                    if elapsedHrs:
+                        elapsedTime+=str(elapsedHrs)+"h "
+                    elapsedTime+=str(elapsedMin)+"m"
+                    print("  Since "+((startDate + " ") if elapsedDay else "") + m.group(3) + " ("+elapsedTime+"): " + m.group(1))
+                else :
+                    m = reUserQueued.match(user)
+                    if not m:
+                        print "-E- Unrecognized line : " + user
+                        continue
+                    print (Color.red + Color.blinking + "  QUEUED " + Color.reset + m.group(1) + " for " + m.group(2) + " license" + ("" if int(m.group(2)==1) else "s") )
     else:
         #If feat has an empty entry, it means the the feature is no longer supported
         print Color.red + feat +Color.reset + " is "+Color.red + Color.blinking +"unsupported" + Color.reset+" by license server"
@@ -106,13 +116,14 @@ if os.path.isfile(licFile) :
             mOk = reFeatureOk.match(line)
             #match the user reporting line
             mUser = reUser.match(line)
+            mUserQueued = reUserQueued.match(line)
             #If the feature is no longer supported
             mNok = reFeatureNok.match(line)
             if mOk:
                 #Add an endtry and the relevant informations
                 current_feature = mOk.group(1)
                 lics[current_feature] = [mOk.group(2),mOk.group(3),list()]
-            if mUser:
+            if mUser or mUserQueued:
                 #Users are added to the last entry added
                 lics[current_feature][2].append(line.strip())
             if mNok:
@@ -162,7 +173,7 @@ if os.path.isfile(licFile) :
         if arg not in ["-all", "-list", "-help"] :
             #For each other argument :
             matchingFeat = set()
-            reFeat = re.compile(arg)
+            reFeat = re.compile(".*"+arg+".*")
             #Check if expr match the feature list
             for feat in lics.keys():
                 if reFeat.match(feat):
