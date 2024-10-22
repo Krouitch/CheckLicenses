@@ -4,6 +4,7 @@ import sys
 import re
 import os
 import time
+import datetime
 
 class Color:
     """Colors class:reset all colors with colors.reset; two sub classes fg for foreground and bg for background; use as colors.subclass.colorname. i.e. colors.fg.red or colors.bg.greenalso, the generic bold, disable, underline, reverse, strike through, and invisible work with the main class i.e. colors.bold"""
@@ -50,7 +51,9 @@ def printHelp():
 licFile = os.path.expanduser("~/.lic")
 
 reFeatureOk = re.compile(r"Users of ([-\w\d]+):\s+\(Total of (\d+) licenses? issued;\s+Total of (\d+) licenses? in use\)")
+reFeatureFuture = re.compile(r"Users of ([-\w\d]+):\s+\(Warning: (\d+) licenses?, future start date\)")
 reFeatureNok = re.compile(r"Users of ([-\w\d]+):\s+\(Error: (\d+) licenses?,\s+unsupported by licensed server\)")
+reReservation = re.compile(r"\s*\d+\s+RESERVATION[s]* for .*")
 reUser = re.compile(r"(.*),\s+start\s+\w+\s+(\d+\/\d+)\s+(\d+:\d+)")
 reUserQueued = re.compile(r"(.*)\squeued for (\d+) licenses?")
 
@@ -66,12 +69,14 @@ def printFeature(feat):
         #Get the number of free licenses
         freeLics = int(nbLic) - int(nbInUse)
         #Plural for free licenses
-        licPlural = "" if (freeLics==1) else "s"
+        licPlural = "" if (freeLics==1 or freeLics==-1) else "s"
         #Plural for nb of licenses
         licsPlural = "" if (int(nbLic)==1) else "s"
         #indicate if licenses are available
-        if freeLics:
+        if freeLics > 0:
             print Color.green + feat + Color.reset + " is available. " + Color.green + str(freeLics)+ Color.reset + " license"+ licPlural +" free out of " + nbLic
+        elif freeLics < 0:
+            print Color.blue + feat + Color.reset + " is not available yet. " + Color.blue + str(-freeLics)+ Color.reset + " license"+ licPlural +" will be available"
         else :
             print Color.red + feat + Color.reset + " is not available. "+Color.red+ nbLic + Color.reset + " license"+licsPlural + " in use."
 
@@ -80,8 +85,8 @@ def printFeature(feat):
                 #Use the regex to retrieve relevant informations
                 m = reUser.match(user)
                 if m :
-                    startDate = m.group(2)
-                    startYearDay = time.strptime(startDate,"%m/%d").tm_yday
+                    startDate = m.group(2)+"/" + str(datetime.date.today().year)
+                    startYearDay = time.strptime(startDate,"%m/%d/%Y").tm_yday
                     startHour = int(m.group(3).split(":")[0])
                     startMin = int(m.group(3).split(":")[1])
                     currYearDay = time.localtime(time.time()).tm_yday
@@ -90,21 +95,30 @@ def printFeature(feat):
                     elapsedMin = (currMin - startMin) if (currMin>=startMin) else (currMin - startMin +60)
                     elapsedHrs = (currHour - startHour) if (currHour>=startHour) else (currHour - startHour +24)
                     elapsedHrs = (elapsedHrs) if (currMin>=startMin) else (elapsedHrs -1)
-                    elapsedDay = (currYearDay - startYearDay) if (currYearDay>=startYearDay) else (currYearDay - startYearDay +365)
+                    elapsedDay = (currYearDay - startYearDay) if (currYearDay>=startYearDay) else (currYearDay - startYearDay + 365)
                     elapsedDay = (elapsedDay) if (currHour>=startHour) else (elapsedDay -1)
                     elapsedTime = ""
                     if elapsedDay:
-                        elapsedTime+=str(elapsedDay)+"D "
+                        elapsedTime+="%2dD " % elapsedDay
+                    else:
+                        elapsedTime+="    "
                     if elapsedHrs:
-                        elapsedTime+=str(elapsedHrs)+"h "
-                    elapsedTime+=str(elapsedMin)+"m"
-                    print("  Since "+((startDate + " ") if elapsedDay else "") + m.group(3) + " ("+elapsedTime+"): " + m.group(1))
+                        elapsedTime+="%2dh " % elapsedHrs
+                    else:
+                        elapsedTime+="    "
+                    elapsedTime+="%2dm" % elapsedMin
+                    print("  Since %-10s (%s) --> %s" % (((startDate + " ") if elapsedDay else "") + m.group(3), elapsedTime, m.group(1) ))
                 else :
                     m = reUserQueued.match(user)
-                    if not m:
-                        print "-E- Unrecognized line : " + user
-                        continue
-                    print (Color.red + Color.blinking + "  QUEUED " + Color.reset + m.group(1) + " for " + m.group(2) + " license" + ("" if int(m.group(2)==1) else "s") )
+                    if m:
+                        print (Color.red + Color.blinking + "  QUEUED " + Color.reset + m.group(1) + " for " + m.group(2) + " license" + ("" if int(m.group(2)==1) else "s") )
+                    else:
+                        m = reReservation.match(user)
+                        if not m:
+                            print "-E- Unrecognized line : " + user
+                            continue
+                        print (Color.orange + "  RESERVED:        " + Color.reset +  user  )
+
     else:
         #If feat has an empty entry, it means the the feature is no longer supported
         print Color.red + feat +Color.reset + " is "+Color.red + Color.blinking +"unsupported" + Color.reset+" by license server"
@@ -117,7 +131,9 @@ if os.path.isfile(licFile) :
             #match the user reporting line
             mUser = reUser.match(line)
             mUserQueued = reUserQueued.match(line)
+            mReservation = reReservation.match(line)
             #If the feature is no longer supported
+            mFuture = reFeatureFuture.match(line)
             mNok = reFeatureNok.match(line)
             if mOk:
                 #Add an endtry and the relevant informations
@@ -126,9 +142,14 @@ if os.path.isfile(licFile) :
             if mUser or mUserQueued:
                 #Users are added to the last entry added
                 lics[current_feature][2].append(line.strip())
+            if mReservation:
+                #Reservation entry added
+                lics[current_feature][2].append(line.strip())
             if mNok:
                 #Add an empty entry
                 lics[mNok.group(1)] = None
+            if mFuture:
+                lics[mFuture.group(1)] =[-int(mFuture.group(2)),0,list()]
     #Clean .lic file
     os.remove(licFile)
     #Parse argument
@@ -173,7 +194,7 @@ if os.path.isfile(licFile) :
         if arg not in ["-all", "-list", "-help"] :
             #For each other argument :
             matchingFeat = set()
-            reFeat = re.compile(".*"+arg+".*")
+            reFeat = re.compile(".*"+arg+".*",re.IGNORECASE)
             #Check if expr match the feature list
             for feat in lics.keys():
                 if reFeat.match(feat):
